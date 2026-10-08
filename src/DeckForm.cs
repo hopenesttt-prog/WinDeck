@@ -1,0 +1,943 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace WinDeck
+{
+    /// <summary>
+    /// 항상 위에 떠 있는 버튼 패널.
+    /// WS_EX_NOACTIVATE 창이라 클릭해도 활성화되지 않으므로, 문장·단축키가 원래 쓰던 창에 그대로 들어간다.
+    /// </summary>
+    public class DeckForm : Form
+    {
+        const int HotkeyId = 0x5D01;
+
+        AppConfig cfg;
+        readonly bool systemHooks;
+        readonly float scale;
+        readonly List<DeckKey> keys = new List<DeckKey>();
+        readonly GlyphButton btnPrev, btnNext, btnSettings, btnHide;
+        readonly ToolTip tip;
+        readonly ContextMenuStrip keyMenu, panelMenu;
+        readonly Timer foregroundTimer;
+        readonly Font titleFont, countFont, tipTitleFont, tipBodyFont, tipDetailFont;
+        NotifyIcon tray;
+        ContextMenuStrip trayMenu;
+        ToolStripMenuItem trayToggleItem, trayAutoStartItem;
+        ToolStripMenuItem miEdit, miRun, miCopy, miPaste, miClear;
+        DeckButton copiedButton;
+        Rectangle titleRect;
+        bool dragging;
+        Point dragCursor, dragOrigin;
+        int wheelAccum;
+        bool exiting, hideHintShown, dialogOpen, dwmBorder;
+
+        public DeckForm(AppConfig config, bool systemHooks)
+        {
+            cfg = config;
+            this.systemHooks = systemHooks;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
+
+            Text = "WinDeck";
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.PanelBack;
+            DoubleBuffered = true;
+            Font = new Font(Theme.UiFontName, 9f);
+            Icon = AppIcon.CreateIcon(32);
+            TopMost = cfg.TopMost;
+
+            titleFont = new Font(Theme.UiFontName, 9f, FontStyle.Bold);
+            countFont = new Font(Theme.UiFontName, 8.25f);
+            tipTitleFont = new Font(Theme.UiFontName, 9.5f, FontStyle.Bold);
+            tipBodyFont = new Font(Theme.UiFontName, 9f);
+            tipDetailFont = new Font(Theme.UiFontName, 8.25f);
+
+            tip = new ToolTip { ShowAlways = true, InitialDelay = 450, ReshowDelay = 120, AutoPopDelay = 20000, OwnerDraw = true };
+            tip.Popup += Tip_Popup;
+            tip.Draw += Tip_Draw;
+
+            keyMenu = BuildKeyMenu();
+            panelMenu = BuildPanelMenu();
+            ContextMenuStrip = panelMenu;
+            tip.SetToolTip(this, "·");
+
+            for (int i = 0; i < AppConfig.KeyCount; i++)
+            {
+                var k = new DeckKey(i);
+                k.KeyClicked += Key_Clicked;
+                k.Wheel += HandleWheel;
+                k.DragEnter += Key_DragEnter;
+                k.DragDrop += Key_DragDrop;
+                k.ContextMenuStrip = keyMenu;
+                keys.Add(k);
+                Controls.Add(k);
+            }
+
+            btnPrev = AddBarButton(Glyphs.ChevronLeft, "이전 페이지", delegate { ChangePage(-1); });
+            btnNext = AddBarButton(Glyphs.ChevronRight, "다음 페이지", delegate { ChangePage(1); });
+            btnSettings = AddBarButton(Glyphs.Settings, "설정", delegate { OpenSettings(); });
+            btnHide = AddBarButton(Glyphs.Minimize, "숨기기", delegate { HidePanel(); });
+
+            if (systemHooks) BuildTray();
+
+            foregroundTimer = new Timer { Interval = 250 };
+            foregroundTimer.Tick += delegate { ActionRunner.TrackForeground(); };
+            foregroundTimer.Start();
+
+            ApplyConfig(true);
+        }
+
+        public AppConfig Config
+        {
+            get { return cfg; }
+        }
+
+        DeckPage CurrentPage
+        {
+            get { return cfg.Pages[Math.Max(0, Math.Min(cfg.Pages.Count - 1, cfg.CurrentPage))]; }
+        }
+
+        int S(float v)
+        {
+            return (int)Math.Round(v * scale);
+        }
+
+        // ------------------------------------------------------------------ window behaviour
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW;
+                return cp;
+            }
+        }
+
+        protected override bool ShowWithoutActivation
+        {
+            get { return true; }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == Native.WM_MOUSEACTIVATE)
+            {
+                m.Result = (IntPtr)Native.MA_NOACTIVATE;
+                return;
+            }
+            if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
+            {
+                TogglePanel();
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try
+            {
+                int pref = Native.DWMWCP_ROUND;
+                bool round = Native.DwmSetWindowAttribute(Handle, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, 4) == 0;
+                int color = Theme.PanelBorder.R | (Theme.PanelBorder.G << 8) | (Theme.PanelBorder.B << 16);
+                dwmBorder = round && Native.DwmSetWindowAttribute(Handle, Native.DWMWA_BORDER_COLOR, ref color, 4) == 0;
+            }
+            catch (Exception)
+            {
+                dwmBorder = false;
+            }
+            RegisterHotkey();
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            Native.UnregisterHotKey(Handle, HotkeyId);
+            base.OnHandleDestroyed(e);
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            if (tray == null) return;
+            if (ConfigStore.LoadWarning != null)
+            {
+                ShowWarning(ConfigStore.LoadWarning);
+            }
+            else if (ConfigStore.IsNew)
+            {
+                tray.ShowBalloonTip(8000, "WinDeck 이 실행되었습니다",
+                    "버튼 클릭: 실행 · 우클릭: 편집 · 빈 칸에 파일/폴더/링크 끌어놓기\n"
+                    + HotkeyText + " 로 패널을 숨기거나 다시 열 수 있습니다.", ToolTipIcon.Info);
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (!exiting && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                HidePanel();
+                return;
+            }
+            base.OnFormClosing(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foregroundTimer.Dispose();
+                if (tray != null) tray.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        // ------------------------------------------------------------------ layout & paint
+
+        public void ApplyConfig(bool first)
+        {
+            if (Math.Abs(Opacity - cfg.Opacity / 100.0) > 0.001) Opacity = cfg.Opacity / 100.0;
+            if (TopMost != cfg.TopMost) TopMost = cfg.TopMost;
+            DoLayoutPanel();
+            if (first)
+            {
+                Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+                Location = cfg.HasPosition
+                    ? new Point(cfg.WindowX, cfg.WindowY)
+                    : new Point(wa.Right - Width - S(24), wa.Bottom - Height - S(24));
+            }
+            ClampToScreen();
+            RefreshKeys();
+            RegisterHotkey();
+        }
+
+        void DoLayoutPanel()
+        {
+            int pad = S(10), gap = S(8), k = S(cfg.KeySize);
+            int barTop = S(7), barH = S(26);
+            int cols = cfg.Vertical ? 2 : 4;
+            int rows = cfg.Vertical ? 4 : 2;
+            int gridTop = barTop + barH + S(7);
+            int width = pad * 2 + cols * k + (cols - 1) * gap;
+            int height = gridTop + rows * k + (rows - 1) * gap + pad;
+            ClientSize = new Size(width, height);
+
+            for (int i = 0; i < keys.Count; i++)
+            {
+                int c = i % cols, r = i / cols;
+                keys[i].Bounds = new Rectangle(pad + c * (k + gap), gridTop + r * (k + gap), k, k);
+            }
+
+            int bw = S(26);
+            btnPrev.Bounds = new Rectangle(pad - S(3), barTop, bw, barH);
+            btnNext.Bounds = new Rectangle(btnPrev.Right, barTop, bw, barH);
+            btnHide.Bounds = new Rectangle(width - pad + S(3) - bw, barTop, bw, barH);
+            btnSettings.Bounds = new Rectangle(btnHide.Left - bw, barTop, bw, barH);
+            titleRect = new Rectangle(btnNext.Right + S(6), barTop, Math.Max(0, btnSettings.Left - btnNext.Right - S(10)), barH);
+            Invalidate();
+        }
+
+        void ClampToScreen()
+        {
+            Rectangle wa = Screen.FromRectangle(Bounds).WorkingArea;
+            int x = Math.Max(wa.Left, Math.Min(Left, wa.Right - Width));
+            int y = Math.Max(wa.Top, Math.Min(Top, wa.Bottom - Height));
+            if (x != Left || y != Top) Location = new Point(x, y);
+        }
+
+        void RefreshKeys()
+        {
+            DeckPage page = CurrentPage;
+            for (int i = 0; i < keys.Count; i++)
+            {
+                keys[i].Data = page.Buttons[i];
+                tip.SetToolTip(keys[i], "·");
+                keys[i].Invalidate();
+            }
+            bool multi = cfg.Pages.Count > 1;
+            btnPrev.Enabled = multi;
+            btnNext.Enabled = multi;
+            Invalidate();
+            UpdateTrayText();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Graphics g = e.Graphics;
+            if (!dwmBorder)
+                using (var pen = new Pen(Theme.PanelBorder))
+                    g.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+
+            if (titleRect.Width <= 0) return;
+            string name = CurrentPage.Name;
+            string count = (cfg.CurrentPage + 1) + "/" + cfg.Pages.Count;
+            const TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine
+                | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+            Size cs = TextRenderer.MeasureText(g, count, countFont, Size.Empty, flags);
+            Size ns = TextRenderer.MeasureText(g, name, titleFont, Size.Empty, flags);
+            // 좁은 세로 배치에서는 페이지 번호보다 이름을 우선해서 보여준다.
+            bool showCount = ns.Width + S(6) + cs.Width <= titleRect.Width;
+            int nameWidth = showCount ? ns.Width : titleRect.Width;
+            TextRenderer.DrawText(g, name, titleFont, new Rectangle(titleRect.X, titleRect.Y, nameWidth, titleRect.Height),
+                Theme.Text, flags | TextFormatFlags.EndEllipsis);
+            if (showCount)
+                TextRenderer.DrawText(g, count, countFont,
+                    new Rectangle(titleRect.X + nameWidth + S(6), titleRect.Y, cs.Width + S(2), titleRect.Height),
+                    Theme.TextDim, flags);
+        }
+
+        GlyphButton AddBarButton(string glyph, string tipTitle, EventHandler onClick)
+        {
+            var b = new GlyphButton(glyph, tipTitle);
+            b.Clicked += onClick;
+            tip.SetToolTip(b, "·");
+            Controls.Add(b);
+            return b;
+        }
+
+        // ------------------------------------------------------------------ dragging & wheel
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            dragging = true;
+            dragCursor = Cursor.Position;
+            dragOrigin = Location;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (!dragging)
+            {
+                Cursor = titleRect.Contains(e.Location) ? Cursors.SizeAll : Cursors.Default;
+                return;
+            }
+            Point c = Cursor.Position;
+            int x = dragOrigin.X + c.X - dragCursor.X;
+            int y = dragOrigin.Y + c.Y - dragCursor.Y;
+            Rectangle wa = Screen.FromPoint(c).WorkingArea;
+            int snap = S(16);
+            if (Math.Abs(x - wa.Left) < snap) x = wa.Left;
+            else if (Math.Abs(x + Width - wa.Right) < snap) x = wa.Right - Width;
+            if (Math.Abs(y - wa.Top) < snap) y = wa.Top;
+            else if (Math.Abs(y + Height - wa.Bottom) < snap) y = wa.Bottom - Height;
+            Location = new Point(x, y);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (!dragging) return;
+            dragging = false;
+            SavePosition();
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            HandleWheel(e.Delta);
+        }
+
+        void HandleWheel(int delta)
+        {
+            wheelAccum += delta;
+            while (wheelAccum >= 120) { wheelAccum -= 120; ChangePage(-1); }
+            while (wheelAccum <= -120) { wheelAccum += 120; ChangePage(1); }
+        }
+
+        void SavePosition()
+        {
+            cfg.WindowX = Left;
+            cfg.WindowY = Top;
+            cfg.HasPosition = true;
+            SaveConfig();
+        }
+
+        // ------------------------------------------------------------------ pages
+
+        public bool GoToPage(string pageId)
+        {
+            int idx = cfg.Pages.FindIndex(p => p.Id == pageId);
+            if (idx < 0) return false;
+            cfg.CurrentPage = idx;
+            SaveConfig();
+            RefreshKeys();
+            return true;
+        }
+
+        void ChangePage(int delta)
+        {
+            int n = cfg.Pages.Count;
+            if (n <= 1) return;
+            cfg.CurrentPage = ((cfg.CurrentPage + delta) % n + n) % n;
+            SaveConfig();
+            RefreshKeys();
+        }
+
+        void AddPage()
+        {
+            string name = AskText("페이지 추가", "새 페이지 이름", "페이지 " + (cfg.Pages.Count + 1));
+            if (name == null) return;
+            cfg.Pages.Add(DeckPage.CreateEmpty(name));
+            cfg.CurrentPage = cfg.Pages.Count - 1;
+            SaveConfig();
+            RefreshKeys();
+        }
+
+        void RenamePage()
+        {
+            string name = AskText("페이지 이름 변경", "페이지 이름", CurrentPage.Name);
+            if (name == null) return;
+            CurrentPage.Name = name;
+            SaveConfig();
+            RefreshKeys();
+        }
+
+        string AskText(string title, string prompt, string initial)
+        {
+            if (dialogOpen) return null;
+            dialogOpen = true;
+            try { return InputDialog.Ask(this, title, prompt, initial); }
+            finally { dialogOpen = false; }
+        }
+
+        // ------------------------------------------------------------------ keys
+
+        void Key_Clicked(object sender, EventArgs e)
+        {
+            var k = (DeckKey)sender;
+            if (k.Data == null || k.Data.IsEmpty)
+            {
+                EditKey(k.Index);
+                return;
+            }
+            Execute(k);
+        }
+
+        void Execute(DeckKey k)
+        {
+            DeckButton b = k.Data;
+            try
+            {
+                ActionRunner.Run(b, this);
+                k.Flash(Theme.Success);
+            }
+            catch (ActionException ex)
+            {
+                k.Flash(Theme.Error);
+                ShowWarning(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                k.Flash(Theme.Error);
+                ErrorLog.Write(ex);
+                ShowWarning("실행 중 오류가 발생했습니다.\n" + ex.Message);
+            }
+        }
+
+        public void EditKey(int index)
+        {
+            if (dialogOpen) return;
+            dialogOpen = true;
+            try
+            {
+                DeckPage page = CurrentPage;
+                using (var f = new ButtonEditForm(page.Buttons[index].Clone(), cfg))
+                {
+                    if (f.ShowDialog(this) != DialogResult.OK) return;
+                    page.Buttons[index] = f.Result;
+                    SaveConfig();
+                    RefreshKeys();
+                    keys[index].Flash(Theme.Accent);
+                }
+            }
+            finally
+            {
+                dialogOpen = false;
+            }
+        }
+
+        ContextMenuStrip BuildKeyMenu()
+        {
+            var m = new ContextMenuStrip();
+            miEdit = new ToolStripMenuItem("버튼 편집…", null, delegate { if (MenuKey != null) EditKey(MenuKey.Index); });
+            miEdit.Font = new Font(m.Font, FontStyle.Bold);
+            miRun = new ToolStripMenuItem("지금 실행", null, delegate { if (MenuKey != null) Execute(MenuKey); });
+            miCopy = new ToolStripMenuItem("복사", null, delegate { if (MenuKey != null) copiedButton = MenuKey.Data.Clone(); });
+            miPaste = new ToolStripMenuItem("붙여넣기", null, delegate { PasteInto(MenuKey); });
+            miClear = new ToolStripMenuItem("비우기", null, delegate { ClearKey(MenuKey); });
+            m.Items.AddRange(new ToolStripItem[]
+            {
+                miEdit, miRun, new ToolStripSeparator(), miCopy, miPaste, miClear, new ToolStripSeparator(),
+                new ToolStripMenuItem("페이지 이름 변경…", null, delegate { RenamePage(); }),
+                new ToolStripMenuItem("페이지 추가…", null, delegate { AddPage(); }),
+                new ToolStripMenuItem("설정…", null, delegate { OpenSettings(); })
+            });
+            m.Opening += delegate
+            {
+                menuKey = m.SourceControl as DeckKey;
+                DeckKey k = menuKey;
+                bool has = k != null && k.Data != null && !k.Data.IsEmpty;
+                miRun.Enabled = has && k.Data.Action != ActionTypes.None;
+                miCopy.Enabled = has;
+                miClear.Enabled = has;
+                miPaste.Enabled = copiedButton != null;
+            };
+            return m;
+        }
+
+        DeckKey menuKey;
+
+        DeckKey MenuKey
+        {
+            get { return menuKey; }
+        }
+
+        ContextMenuStrip BuildPanelMenu()
+        {
+            var m = new ContextMenuStrip();
+            m.Items.AddRange(new ToolStripItem[]
+            {
+                new ToolStripMenuItem("설정…", null, delegate { OpenSettings(); }),
+                new ToolStripMenuItem("페이지 이름 변경…", null, delegate { RenamePage(); }),
+                new ToolStripMenuItem("페이지 추가…", null, delegate { AddPage(); }),
+                new ToolStripSeparator(),
+                new ToolStripMenuItem("숨기기", null, delegate { HidePanel(); }),
+                new ToolStripMenuItem("종료", null, delegate { ExitApp(); })
+            });
+            return m;
+        }
+
+        void PasteInto(DeckKey k)
+        {
+            if (k == null || copiedButton == null) return;
+            if (!ConfirmReplace(k.Data, "붙여넣은 버튼")) return;
+            CurrentPage.Buttons[k.Index] = copiedButton.Clone();
+            SaveConfig();
+            RefreshKeys();
+            k.Flash(Theme.Accent);
+        }
+
+        void ClearKey(DeckKey k)
+        {
+            if (k == null || k.Data == null || k.Data.IsEmpty) return;
+            string name = string.IsNullOrWhiteSpace(k.Data.Title) ? "이" : "'" + k.Data.Title + "'";
+            if (MessageBox.Show(this, name + " 버튼을 비울까요?", "WinDeck", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            CurrentPage.Buttons[k.Index] = new DeckButton();
+            SaveConfig();
+            RefreshKeys();
+        }
+
+        bool ConfirmReplace(DeckButton existing, string what)
+        {
+            if (existing == null || existing.IsEmpty) return true;
+            string name = string.IsNullOrWhiteSpace(existing.Title) ? "기존" : "'" + existing.Title + "'";
+            return MessageBox.Show(this, name + " 버튼을 " + what + "(으)로 바꿀까요?", "WinDeck",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+        }
+
+        // ------------------------------------------------------------------ drag & drop onto a key
+
+        void Key_DragEnter(object sender, DragEventArgs e)
+        {
+            bool ok = e.Data.GetDataPresent(DataFormats.FileDrop)
+                || e.Data.GetDataPresent(DataFormats.UnicodeText)
+                || e.Data.GetDataPresent(DataFormats.Text);
+            if (!ok) e.Effect = DragDropEffects.None;
+            else if ((e.AllowedEffect & DragDropEffects.Copy) != 0) e.Effect = DragDropEffects.Copy;
+            else if ((e.AllowedEffect & DragDropEffects.Link) != 0) e.Effect = DragDropEffects.Link;
+            else e.Effect = DragDropEffects.None;
+        }
+
+        void Key_DragDrop(object sender, DragEventArgs e)
+        {
+            var k = (DeckKey)sender;
+            DeckButton b = ButtonFromDrop(e.Data);
+            if (b == null) return;
+            // 끌어온 프로그램이 응답을 기다리지 않도록 확인 창은 드롭이 끝난 뒤에 띄운다.
+            BeginInvoke(new Action(delegate
+            {
+                if (!ConfirmReplace(k.Data, "'" + b.Title + "'")) return;
+                CurrentPage.Buttons[k.Index] = b;
+                SaveConfig();
+                RefreshKeys();
+                k.Flash(Theme.Accent);
+            }));
+        }
+
+        static DeckButton ButtonFromDrop(IDataObject data)
+        {
+            var files = data.GetData(DataFormats.FileDrop) as string[];
+            if (files != null && files.Length > 0)
+            {
+                string path = files[0];
+                if (Directory.Exists(path))
+                {
+                    string name = new DirectoryInfo(path).Name.TrimEnd('\\');
+                    return new DeckButton { Title = name, Action = ActionTypes.Folder, Target = path };
+                }
+                string title = Path.GetFileNameWithoutExtension(path);
+                if (Path.GetExtension(path).Equals(".url", StringComparison.OrdinalIgnoreCase))
+                {
+                    string url = ReadInternetShortcut(path);
+                    if (url != null) return new DeckButton { Title = title, Action = ActionTypes.Url, Target = url };
+                }
+                return new DeckButton { Title = title, Action = ActionTypes.Run, Target = path };
+            }
+
+            string text = (data.GetData(DataFormats.UnicodeText) as string) ?? (data.GetData(DataFormats.Text) as string);
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            text = text.Trim();
+            Uri uri;
+            if ((text.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || text.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                || text.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                && !text.Contains("\n")
+                && Uri.TryCreate(ActionRunner.NormalizeUrl(text), UriKind.Absolute, out uri))
+            {
+                string host = uri.Host.StartsWith("www.") ? uri.Host.Substring(4) : uri.Host;
+                return new DeckButton { Title = host, Action = ActionTypes.Url, Target = text };
+            }
+            string firstLine = text.Split('\n')[0].Trim();
+            string shortTitle = firstLine.Length > 10 ? firstLine.Substring(0, 10) + "…" : firstLine;
+            return new DeckButton { Title = shortTitle, Action = ActionTypes.Text, Target = text };
+        }
+
+        static string ReadInternetShortcut(string path)
+        {
+            try
+            {
+                foreach (string line in File.ReadAllLines(path))
+                    if (line.StartsWith("URL=", StringComparison.OrdinalIgnoreCase)) return line.Substring(4).Trim();
+            }
+            catch (Exception) { }
+            return null;
+        }
+
+        // ------------------------------------------------------------------ tooltips
+
+        class TipContent
+        {
+            public string Title, Body, Detail;
+        }
+
+        TipContent GetTip(Control c)
+        {
+            var k = c as DeckKey;
+            if (k != null)
+            {
+                DeckButton b = k.Data;
+                if (b == null) return null;
+                if (b.IsEmpty)
+                    return new TipContent
+                    {
+                        Title = "빈 버튼",
+                        Body = "클릭해서 설정하거나, 파일·폴더·링크를 이 칸에 끌어다 놓으세요.",
+                        Detail = "우클릭: 메뉴"
+                    };
+                string title = string.IsNullOrWhiteSpace(b.Title) ? ActionTypes.DisplayName(b.Action) : b.Title;
+                return new TipContent { Title = title, Body = b.Description, Detail = ActionDetail(b) };
+            }
+            var gb = c as GlyphButton;
+            if (gb != null)
+            {
+                if (gb == btnHide) return new TipContent { Title = gb.TipTitle, Detail = "다시 열기: " + HotkeyText + " 또는 트레이 아이콘" };
+                if (gb == btnPrev || gb == btnNext) return new TipContent { Title = gb.TipTitle, Detail = "패널 위에서 마우스 휠로도 넘길 수 있습니다." };
+                return new TipContent { Title = gb.TipTitle };
+            }
+            if (c == this)
+                return new TipContent
+                {
+                    Title = CurrentPage.Name,
+                    Detail = "끌어서 이동 · 휠: 페이지 넘기기 · 우클릭: 메뉴"
+                };
+            return null;
+        }
+
+        string ActionDetail(DeckButton b)
+        {
+            switch (b.Action)
+            {
+                case ActionTypes.Folder: return "폴더 열기 · " + Shorten(b.Target, 60);
+                case ActionTypes.Url: return "링크 열기 · " + Shorten(b.Target, 60);
+                case ActionTypes.Text:
+                    return "문장 입력 · " + Shorten(b.Target.Replace("\r", "").Replace("\n", " / "), 50)
+                        + (b.PressEnter ? "  (+Enter)" : "");
+                case ActionTypes.Hotkey: return "단축키 · " + b.Target;
+                case ActionTypes.Run:
+                    return "실행 · " + Shorten(b.Target, 60) + (string.IsNullOrWhiteSpace(b.Args) ? "" : " " + Shorten(b.Args, 30));
+                case ActionTypes.Page:
+                    DeckPage p = cfg.Pages.FirstOrDefault(x => x.Id == b.Target);
+                    return "페이지 이동 · " + (p == null ? "(없는 페이지)" : p.Name);
+            }
+            return "동작 없음";
+        }
+
+        static string Shorten(string s, int max)
+        {
+            s = s ?? "";
+            return s.Length <= max ? s : s.Substring(0, max - 1) + "…";
+        }
+
+        const TextFormatFlags TipFlags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.Left | TextFormatFlags.Top;
+
+        void Tip_Popup(object sender, PopupEventArgs e)
+        {
+            TipContent t = GetTip(e.AssociatedControl);
+            if (t == null)
+            {
+                e.Cancel = true;
+                return;
+            }
+            Rectangle[] parts;
+            e.ToolTipSize = MeasureTip(t, out parts);
+        }
+
+        Size MeasureTip(TipContent t, out Rectangle[] parts)
+        {
+            int pad = S(10), maxW = S(320);
+            var proposed = new Size(maxW, int.MaxValue);
+            Size ts = TextRenderer.MeasureText(t.Title ?? "", tipTitleFont, proposed, TipFlags);
+            Size bs = string.IsNullOrWhiteSpace(t.Body) ? Size.Empty : TextRenderer.MeasureText(t.Body, tipBodyFont, proposed, TipFlags);
+            Size ds = string.IsNullOrWhiteSpace(t.Detail) ? Size.Empty : TextRenderer.MeasureText(t.Detail, tipDetailFont, proposed, TipFlags);
+            int w = Math.Max(ts.Width, Math.Max(bs.Width, ds.Width));
+            int y = pad;
+            var tr = new Rectangle(pad, y, w, ts.Height);
+            y = tr.Bottom;
+            Rectangle br = Rectangle.Empty, dr = Rectangle.Empty;
+            if (bs != Size.Empty)
+            {
+                br = new Rectangle(pad, y + S(4), w, bs.Height);
+                y = br.Bottom;
+            }
+            if (ds != Size.Empty)
+            {
+                dr = new Rectangle(pad, y + S(6), w, ds.Height);
+                y = dr.Bottom;
+            }
+            parts = new[] { tr, br, dr };
+            return new Size(w + pad * 2, y + pad);
+        }
+
+        void Tip_Draw(object sender, DrawToolTipEventArgs e)
+        {
+            TipContent t = GetTip(e.AssociatedControl) ?? new TipContent { Title = "" };
+            Rectangle[] parts;
+            MeasureTip(t, out parts);
+            Graphics g = e.Graphics;
+            using (var bg = new SolidBrush(Theme.TipBack)) g.FillRectangle(bg, e.Bounds);
+            using (var pen = new Pen(Theme.PanelBorder)) g.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+            TextRenderer.DrawText(g, t.Title ?? "", tipTitleFont, parts[0], Theme.Text, TipFlags);
+            if (parts[1] != Rectangle.Empty) TextRenderer.DrawText(g, t.Body, tipBodyFont, parts[1], Color.FromArgb(214, 214, 220), TipFlags);
+            if (parts[2] != Rectangle.Empty) TextRenderer.DrawText(g, t.Detail, tipDetailFont, parts[2], Theme.TextDim, TipFlags);
+        }
+
+        // ------------------------------------------------------------------ show / hide / hotkey
+
+        string HotkeyText
+        {
+            get { return string.IsNullOrWhiteSpace(cfg.Hotkey) ? "트레이 아이콘" : cfg.Hotkey; }
+        }
+
+        public void TogglePanel()
+        {
+            if (Visible) HidePanel();
+            else ShowPanel();
+        }
+
+        public void ShowPanel()
+        {
+            if (!Visible) Show();
+            Native.SetWindowPos(Handle, cfg.TopMost ? Native.HWND_TOPMOST : Native.HWND_TOP, 0, 0, 0, 0,
+                Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
+        }
+
+        public void HidePanel()
+        {
+            Hide();
+            if (!hideHintShown && tray != null)
+            {
+                hideHintShown = true;
+                tray.ShowBalloonTip(4000, "WinDeck 은 계속 실행 중입니다",
+                    HotkeyText + " 를 누르거나 트레이 아이콘을 클릭하면 다시 열립니다.", ToolTipIcon.Info);
+            }
+        }
+
+        void RegisterHotkey()
+        {
+            if (!systemHooks || !IsHandleCreated) return;
+            Native.UnregisterHotKey(Handle, HotkeyId);
+            if (string.IsNullOrWhiteSpace(cfg.Hotkey)) return;
+            KeyCombo combo;
+            if (!KeyCombo.TryParse(cfg.Hotkey, out combo)) return;
+            if (!Native.RegisterHotKey(Handle, HotkeyId, combo.HotkeyModifiers | Native.MOD_NOREPEAT, combo.Key) && tray != null)
+            {
+                tray.ShowBalloonTip(6000, "단축키를 등록하지 못했습니다",
+                    cfg.Hotkey + " 를 다른 프로그램이 사용 중일 수 있습니다. 설정에서 다른 단축키를 지정하세요.", ToolTipIcon.Warning);
+            }
+        }
+
+        // ------------------------------------------------------------------ tray
+
+        void BuildTray()
+        {
+            trayToggleItem = new ToolStripMenuItem("패널 숨기기", null, delegate { TogglePanel(); });
+            trayToggleItem.Font = new Font(trayToggleItem.Font, FontStyle.Bold);
+            trayAutoStartItem = new ToolStripMenuItem("윈도우 시작 시 자동 실행", null, delegate { ToggleAutoStart(); });
+            trayMenu = new ContextMenuStrip();
+            trayMenu.Items.AddRange(new ToolStripItem[]
+            {
+                trayToggleItem,
+                new ToolStripMenuItem("설정…", null, delegate { ShowPanel(); OpenSettings(); }),
+                new ToolStripSeparator(),
+                new ToolStripMenuItem("설정 내보내기 (백업)…", null, delegate { ExportConfig(); }),
+                new ToolStripMenuItem("설정 불러오기…", null, delegate { ImportConfig(); }),
+                new ToolStripSeparator(),
+                trayAutoStartItem,
+                new ToolStripSeparator(),
+                new ToolStripMenuItem("종료", null, delegate { ExitApp(); })
+            });
+            trayMenu.Opening += delegate
+            {
+                trayToggleItem.Text = Visible ? "패널 숨기기" : "패널 보이기";
+                trayAutoStartItem.Checked = AutoStart.IsEnabled();
+            };
+
+            tray = new NotifyIcon
+            {
+                Icon = AppIcon.CreateIcon(SystemInformation.SmallIconSize.Width),
+                Text = "WinDeck",
+                ContextMenuStrip = trayMenu,
+                Visible = true
+            };
+            tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) TogglePanel(); };
+        }
+
+        void UpdateTrayText()
+        {
+            if (tray == null) return;
+            string t = "WinDeck · " + CurrentPage.Name;
+            tray.Text = t.Length > 63 ? t.Substring(0, 63) : t;
+        }
+
+        void ToggleAutoStart()
+        {
+            try
+            {
+                AutoStart.Set(!AutoStart.IsEnabled());
+            }
+            catch (Exception ex)
+            {
+                ShowWarning("자동 실행 설정을 바꾸지 못했습니다.\n" + ex.Message);
+            }
+        }
+
+        public void ExitApp()
+        {
+            exiting = true;
+            try
+            {
+                cfg.WindowX = Left;
+                cfg.WindowY = Top;
+                cfg.HasPosition = true;
+                ConfigStore.Save(cfg);
+            }
+            catch (Exception) { }
+            if (tray != null) tray.Visible = false;
+            Close();
+        }
+
+        // ------------------------------------------------------------------ settings & backup
+
+        public void OpenSettings()
+        {
+            if (dialogOpen) return;
+            dialogOpen = true;
+            try
+            {
+                using (var f = new SettingsForm(ConfigStore.Clone(cfg), AutoStart.IsEnabled()))
+                {
+                    if (f.ShowDialog(this) != DialogResult.OK) return;
+                    AppConfig n = f.Result;
+                    n.HasPosition = true;
+                    n.WindowX = Left;
+                    n.WindowY = Top;
+                    cfg = n;
+                    try
+                    {
+                        if (f.AutoStartEnabled != AutoStart.IsEnabled()) AutoStart.Set(f.AutoStartEnabled);
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowWarning("자동 실행 설정을 바꾸지 못했습니다.\n" + ex.Message);
+                    }
+                    SaveConfig();
+                    ApplyConfig(false);
+                }
+            }
+            finally
+            {
+                dialogOpen = false;
+            }
+        }
+
+        void ExportConfig()
+        {
+            if (dialogOpen) return;
+            dialogOpen = true;
+            try { BackupUi.Export(this, cfg); }
+            finally { dialogOpen = false; }
+        }
+
+        void ImportConfig()
+        {
+            if (dialogOpen) return;
+            dialogOpen = true;
+            try
+            {
+                AppConfig n = BackupUi.Import(this, cfg);
+                if (n == null) return;
+                n.HasPosition = true;
+                n.WindowX = Left;
+                n.WindowY = Top;
+                cfg = n;
+                SaveConfig();
+                ApplyConfig(false);
+                ShowPanel();
+            }
+            finally
+            {
+                dialogOpen = false;
+            }
+        }
+
+        void SaveConfig()
+        {
+            try
+            {
+                ConfigStore.Save(cfg);
+            }
+            catch (Exception ex)
+            {
+                ErrorLog.Write(ex);
+                ShowWarning("설정을 저장하지 못했습니다.\n" + ex.Message);
+            }
+        }
+
+        void ShowWarning(string message)
+        {
+            MessageBox.Show(this, message, "WinDeck", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+}

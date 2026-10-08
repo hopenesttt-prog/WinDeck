@@ -1,0 +1,4 @@
+# 빌드 결과물 (build.bat 로 다시 만들 수 있음)
+build/
+dist/
+*.tmp
