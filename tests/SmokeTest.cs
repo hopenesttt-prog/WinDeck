@@ -197,6 +197,8 @@ static class SmokeTest
         var cap = new KeyCombo { Ctrl = true, Alt = true, Key = (ushort)Keys.Space };
         Check(cap.ToString() == "Ctrl+Alt+Space" && KeyCombo.Parse(cap.ToString()).Key == 0x20, "captured combo formats and re-parses");
         Check(cap.HotkeyModifiers == 0x3, "hotkey modifier flags");
+        KeyCombo def = KeyCombo.Parse(AppConfig.DefaultHotkey);
+        Check(def.Ctrl && !def.Alt && def.Key == 0xC0 && def.ToString() == AppConfig.DefaultHotkey, "default hotkey Ctrl+` parses and round-trips", def.ToString());
         Check(ActionRunner.NormalizeUrl("naver.com") == "https://naver.com", "url without scheme gets https");
         Check(ActionRunner.NormalizeUrl("localhost:3000") == "https://localhost:3000", "host:port is not a scheme");
         Check(ActionRunner.NormalizeUrl("ms-settings:display") == "ms-settings:display", "app scheme kept");

@@ -48,11 +48,11 @@ namespace WinDeck
 
             AddHeader("패널", 16, 14);
             AddLabel("보이기/숨기기 단축키", 16, 45);
-            txtHotkey = new KeyCaptureBox { Location = new Point(176, 42), Size = new Size(170, 23) };
+            txtHotkey = new KeyCaptureBox { Location = new Point(176, 42), Size = new Size(160, 23) };
             Controls.Add(txtHotkey);
-            btnRecord = new Button { Text = "키 입력받기", Location = new Point(352, 41), Size = new Size(88, 26) };
+            btnRecord = new Button { Text = "단축키 바꾸기", Location = new Point(342, 41), Size = new Size(98, 26) };
             btnRecord.Click += delegate { if (txtHotkey.Capturing) txtHotkey.EndCapture(); else txtHotkey.BeginCapture(); };
-            txtHotkey.CaptureChanged += delegate { btnRecord.Text = txtHotkey.Capturing ? "키를 누르세요" : "키 입력받기"; };
+            txtHotkey.CaptureChanged += delegate { btnRecord.Text = txtHotkey.Capturing ? "새 키를 누르세요" : "단축키 바꾸기"; };
             Controls.Add(btnRecord);
             tips.SetToolTip(txtHotkey, "어디서든 이 키를 누르면 패널이 숨겨지거나 다시 나타납니다. 비워 두면 사용하지 않습니다.");
 

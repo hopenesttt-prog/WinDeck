@@ -209,18 +209,18 @@ namespace WinDeck
 
             p = NewPanel(ActionTypes.Hotkey);
             AddLabel(p, "단축키", 0, 3);
-            txtHotkey = new KeyCaptureBox { Location = new Point(104, 0), Size = new Size(232, 23), AppendMode = false };
+            txtHotkey = new KeyCaptureBox { Location = new Point(104, 0), Size = new Size(224, 23), AppendMode = false };
             p.Controls.Add(txtHotkey);
-            btnRecord = new Button { Text = "키 입력받기", Location = new Point(342, -1), Size = new Size(92, 26) };
+            btnRecord = new Button { Text = "단축키 바꾸기", Location = new Point(334, -1), Size = new Size(100, 26) };
             btnRecord.Click += delegate { if (txtHotkey.Capturing) txtHotkey.EndCapture(); else txtHotkey.BeginCapture(); };
-            txtHotkey.CaptureChanged += delegate { btnRecord.Text = txtHotkey.Capturing ? "키를 누르세요" : "키 입력받기"; };
+            txtHotkey.CaptureChanged += delegate { btnRecord.Text = txtHotkey.Capturing ? "새 키를 누르세요" : "단축키 바꾸기"; };
             p.Controls.Add(btnRecord);
             cboPreset = new ComboBox { Location = new Point(104, 34), Size = new Size(330, 23), DropDownStyle = ComboBoxStyle.DropDownList };
             cboPreset.Items.AddRange(HotkeyPresets);
             cboPreset.SelectedIndex = 0;
             cboPreset.SelectedIndexChanged += delegate { ApplyPreset(); };
             p.Controls.Add(cboPreset);
-            AddHint(p, "직접 입력도 됩니다: Ctrl+Shift+N, Win+E, F5\n여러 키를 차례로 누르려면 쉼표로 구분: Ctrl+A, Ctrl+C\n'키 입력받기'를 누르고 원하는 키를 누르면\n자동으로 적힙니다.", 104, 66);
+            AddHint(p, "직접 입력도 됩니다: Ctrl+Shift+N, Win+E, F5\n여러 키를 차례로 누르려면 쉼표로 구분: Ctrl+A, Ctrl+C\n'단축키 바꾸기'를 누르고 원하는 키를 누르면\n자동으로 적힙니다.", 104, 66);
 
             p = NewPanel(ActionTypes.Run);
             AddLabel(p, "파일 경로", 0, 3);
@@ -463,7 +463,7 @@ namespace WinDeck
                     if (b.Target.Length == 0) return "입력할 문장을 적어 주세요.";
                     break;
                 case ActionTypes.Hotkey:
-                    if (b.Target.Length == 0) return "단축키를 입력하세요. ('키 입력받기'를 누르고 키를 눌러도 됩니다)";
+                    if (b.Target.Length == 0) return "단축키를 입력하세요. ('단축키 바꾸기'를 누르고 원하는 키를 눌러도 됩니다)";
                     try { KeyCombo.ParseSequence(b.Target); }
                     catch (FormatException ex) { return "단축키 형식이 올바르지 않습니다.\n" + ex.Message; }
                     break;

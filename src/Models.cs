@@ -113,7 +113,7 @@ namespace WinDeck
     public class AppConfig
     {
         public const int KeyCount = 8;
-        public const string DefaultHotkey = "Ctrl+Alt+D";
+        public const string DefaultHotkey = "Ctrl+`";
 
         public int Version { get; set; }
         public string Hotkey { get; set; }
