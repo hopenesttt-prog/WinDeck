@@ -8,6 +8,14 @@ using Microsoft.Win32;
 
 namespace WinDeck
 {
+    public static class AppInfo
+    {
+        public static string Version
+        {
+            get { return typeof(AppInfo).Assembly.GetName().Version.ToString(3); }
+        }
+    }
+
     /// <summary>윈도우 시작 시 자동 실행 (HKCU\...\Run).</summary>
     public static class AutoStart
     {

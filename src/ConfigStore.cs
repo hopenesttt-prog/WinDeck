@@ -5,20 +5,87 @@ using System.Web.Script.Serialization;
 
 namespace WinDeck
 {
-    /// <summary>설정 파일(%APPDATA%\WinDeck\config.json) 읽기·쓰기와 백업.</summary>
+    /// <summary>
+    /// 설정 파일 읽기·쓰기와 백업.
+    /// 기본 위치는 %APPDATA%\WinDeck, exe 옆에 WinDeckData 폴더가 있으면 그곳(포터블 모드).
+    /// </summary>
     public static class ConfigStore
     {
+        public const string PortableFolderName = "WinDeckData";
+        public const string TeamDefaultsFileName = "WinDeck.defaults.json";
+
         static string dir;
+        static string appDir;
+
+        /// <summary>WinDeck.exe 가 있는 폴더.</summary>
+        public static string AppDir
+        {
+            get
+            {
+                if (appDir == null) appDir = Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath);
+                return appDir;
+            }
+            set { appDir = value; }
+        }
 
         public static string Dir
         {
             get
             {
-                if (dir == null)
-                    dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WinDeck");
+                if (dir == null) dir = ResolveDir();
                 return dir;
             }
             set { dir = value; }
+        }
+
+        public static bool IsPortable
+        {
+            get { return string.Equals(Path.GetFullPath(Dir), Path.GetFullPath(Path.Combine(AppDir, PortableFolderName)), StringComparison.OrdinalIgnoreCase); }
+        }
+
+        static string ResolveDir()
+        {
+            string portable = Path.Combine(AppDir, PortableFolderName);
+            if (Directory.Exists(portable) && IsWritable(portable)) return portable;
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WinDeck");
+        }
+
+        static bool IsWritable(string folder)
+        {
+            try
+            {
+                string probe = Path.Combine(folder, ".write-test-" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probe, "");
+                File.Delete(probe);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 첫 실행 때 쓸 버튼 구성. exe 옆에 팀 기본 설정(WinDeck.defaults.json)이 있으면 그것을, 없으면 내장 기본값.
+        /// </summary>
+        public static AppConfig CreateInitialConfig()
+        {
+            string teamDefaults = Path.Combine(AppDir, TeamDefaultsFileName);
+            if (File.Exists(teamDefaults))
+            {
+                try
+                {
+                    AppConfig c = Parse(File.ReadAllText(teamDefaults, Encoding.UTF8));
+                    c.HasPosition = false;
+                    c.CurrentPage = 0;
+                    return c;
+                }
+                catch (Exception ex)
+                {
+                    ErrorLog.Write(ex);
+                }
+            }
+            return AppConfig.CreateDefault();
         }
 
         public static string ConfigPath
@@ -61,7 +128,7 @@ namespace WinDeck
                 IsNew = true;
             }
 
-            var c = AppConfig.CreateDefault();
+            AppConfig c = IsNew ? CreateInitialConfig() : AppConfig.CreateDefault();
             try { Save(c); }
             catch (Exception) { }
             return c;

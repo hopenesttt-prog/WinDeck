@@ -46,7 +46,7 @@
 - 페이지 추가·이름 변경·삭제·순서 변경
 - 설정 내보내기(백업) / 불러오기 — 아이콘까지 `.json` 파일 하나에 저장, 다른 PC로 이동 가능
 
-설정 파일 위치: `%APPDATA%\WinDeck\config.json`
+설정 파일 위치: `%APPDATA%\WinDeck\config.json` (포터블판은 exe 옆 `WinDeckData\config.json`)
 불러오기 직전 설정은 `%APPDATA%\WinDeck\backups\` 에 자동 보관.
 
 ## 4. 알려진 제한
@@ -74,7 +74,33 @@ powershell -ExecutionPolicy Bypass -File tests\run-tests.ps1 -OutDir build\test-
 
 `-TypeTest`(테스트 창에 실제 입력), `-E2E`(별도 창 + 실제 마우스 클릭) 옵션 추가 가능. 점검 중에는 마우스·키보드 조작 금지.
 
-## 6. 파일 구조
+## 6. 팀 배포
+
+```bash
+release.bat
+```
+
+`release\` 폴더에 두 파일 생성 (버전은 `src\AssemblyInfo.cs` 기준):
+
+| 파일 | 용도 |
+|---|---|
+| `WinDeck-Setup-1.0.0.exe` | 설치판. 관리자 권한 불필요, 사용자별 설치(`%LOCALAPPDATA%\Programs\WinDeck`), 시작 메뉴·바탕 화면 바로가기, 자동 실행 선택, Windows 설정 > 앱에서 제거 |
+| `WinDeck-Portable-1.0.0.zip` | 포터블판. 압축 해제 후 바로 실행, 설정은 같은 폴더의 `WinDeckData`에 저장 |
+
+팀원용 안내문 `WinDeck 사용 안내.txt` 가 두 패키지에 함께 들어감 (원본: `deploy\`).
+
+**팀 기본 버튼 세트**
+1. 내 패널에서 팀 공용 버튼 구성 → 설정 > 설정 내보내기
+2. 파일 이름을 `WinDeck.defaults.json` 으로 바꿔 `deploy\` 폴더에 넣기
+3. `release.bat` 다시 실행 → 팀원이 처음 실행할 때 이 버튼 구성으로 시작 (이후에는 각자 수정한 설정 사용)
+
+경로는 `%USERPROFILE%\Documents`, `\\서버\공유폴더` 처럼 누구 PC에서나 통하는 형태로 입력. `C:\Users\내이름\...` 경로는 동료 PC에 없음.
+
+**업데이트 배포**: `src\AssemblyInfo.cs` 의 버전 숫자 변경 → `release.bat` → 새 설치 파일을 덮어 설치하면 버튼 설정 유지. 설치 중 실행 중인 WinDeck은 자동 종료.
+
+**보안 경고**: 코드 서명 인증서가 없어 처음 실행 시 "Windows의 PC 보호" 창 표시 → [추가 정보] → [실행]. 일부 백신이 키 입력 기능 때문에 의심할 수 있음 — 사내 배포 시 IT 담당자에게 예외 등록 요청.
+
+## 7. 파일 구조
 
 | 경로 | 내용 |
 |---|---|
@@ -89,4 +115,8 @@ powershell -ExecutionPolicy Bypass -File tests\run-tests.ps1 -OutDir build\test-
 | `src\KeyRenderer.cs`, `src\Controls.cs`, `src\Theme.cs` | 버튼 그리기·화면 요소 |
 | `src\IconCache.cs`, `src\AppIcon.cs` | 버튼 아이콘, 프로그램 아이콘 |
 | `src\Helpers.cs` | 자동 실행, 백업 대화상자, 폴더 선택창, 오류 기록 |
+| `src\AssemblyInfo.cs` | 버전 정보 (배포 버전은 여기서 변경) |
+| `installer\WinDeck.iss` | 설치 파일 스크립트 (Inno Setup 6) |
+| `deploy\` | 팀원용 사용 안내문, (선택) 팀 기본 버튼 세트 |
+| `release.ps1`, `release.bat` | 설치판·포터블판 생성 |
 | `tests\` | 자동 점검 프로그램 |

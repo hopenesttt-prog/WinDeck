@@ -67,6 +67,7 @@ static class SmokeTest
             Console.WriteLine("Screen DPI: " + g.DpiX + "  (scale " + (g.DpiX / 96f) + ")");
 
         TestConfig();
+        TestDistribution();
         TestKeyCombo();
         TestRender();
         if (args.Contains("--input")) TestInput();
@@ -120,6 +121,57 @@ static class SmokeTest
         try { ConfigStore.Parse("[1,2,3]"); }
         catch (InvalidDataException) { threw = true; }
         Check(threw, "import of non-WinDeck json is rejected");
+    }
+
+    // ------------------------------------------------------------------ portable mode & team defaults
+
+    static void TestDistribution()
+    {
+        string app = Path.Combine(outDir, "fakeapp");
+        if (Directory.Exists(app)) Directory.Delete(app, true);
+        Directory.CreateDirectory(app);
+        string savedDir = ConfigStore.Dir;
+        try
+        {
+            ConfigStore.AppDir = app;
+            ConfigStore.Dir = null;
+            string appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WinDeck");
+            Check(ConfigStore.Dir == appData && !ConfigStore.IsPortable, "without WinDeckData folder settings go to %APPDATA%", ConfigStore.Dir);
+
+            string data = Path.Combine(app, ConfigStore.PortableFolderName);
+            Directory.CreateDirectory(data);
+            ConfigStore.Dir = null;
+            Check(ConfigStore.Dir == data && ConfigStore.IsPortable, "WinDeckData folder next to exe enables portable mode", ConfigStore.Dir);
+
+            AppConfig team = AppConfig.CreateDefault();
+            team.Pages[0].Name = "팀 공용";
+            team.Pages[0].Buttons[0].Title = "공유 드라이브";
+            team.HasPosition = true;
+            team.WindowX = 5;
+            team.CurrentPage = 1;
+            ConfigStore.Export(team, Path.Combine(app, ConfigStore.TeamDefaultsFileName));
+
+            AppConfig first = ConfigStore.Load();
+            Check(ConfigStore.IsNew && first.Pages[0].Name == "팀 공용" && first.Pages[0].Buttons[0].Title == "공유 드라이브",
+                "first run starts from team defaults file", first.Pages[0].Name);
+            Check(!first.HasPosition && first.CurrentPage == 0, "team defaults do not carry window position or page");
+            Check(File.Exists(Path.Combine(data, "config.json")), "portable config saved next to exe");
+
+            first.Pages[0].Name = "내 설정";
+            ConfigStore.Save(first);
+            AppConfig again = ConfigStore.Load();
+            Check(!ConfigStore.IsNew && again.Pages[0].Name == "내 설정", "later runs use the user's own config, not team defaults");
+
+            File.WriteAllText(Path.Combine(app, ConfigStore.TeamDefaultsFileName), "{ broken");
+            File.Delete(Path.Combine(data, "config.json"));
+            AppConfig fallback = ConfigStore.Load();
+            Check(fallback.Pages[0].Name == "기본", "broken team defaults file falls back to built-in defaults");
+        }
+        finally
+        {
+            ConfigStore.AppDir = null;
+            ConfigStore.Dir = savedDir;
+        }
     }
 
     // ------------------------------------------------------------------ key combos
