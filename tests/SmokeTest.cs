@@ -218,6 +218,19 @@ static class SmokeTest
     static void TestRender()
     {
         IntPtr fgBefore = GetForegroundWindow();
+
+        // README 용: 내장 기본 버튼 그대로의 패널
+        AppConfig plain = AppConfig.CreateDefault();
+        plain.HasPosition = true;
+        plain.WindowX = 60;
+        plain.WindowY = 60;
+        var plainDeck = new DeckForm(plain, false);
+        plainDeck.Show();
+        Pump(300);
+        Save(plainDeck, "deck_default.png");
+        plainDeck.Close();
+        plainDeck.Dispose();
+
         AppConfig cfg = AppConfig.CreateDefault();
         cfg.Pages[0].Buttons[2].IconData = IconCache.LoadIconData(Path.Combine(outDir, "icon_src.png"));
         cfg.HasPosition = true;

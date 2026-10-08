@@ -1,0 +1,8 @@
+# Windows 전용 프로젝트: 작업 폴더는 CRLF, 저장소에는 LF 로 보관
+* text=auto eol=crlf
+
+*.exe binary
+*.dll binary
+*.ico binary
+*.png binary
+*.zip binary

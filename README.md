@@ -1,13 +1,26 @@
-# WinDeck — 윈도우용 소프트웨어 스트림덱
+# WinDeck
 
-화면에 항상 떠 있는 8칸 버튼 패널. 버튼을 누르면 폴더·링크·프로그램을 열거나, 지정한 문장·단축키를 입력함.
+스트림덱처럼 쓰는 윈도우용 8칸 버튼 패널. 화면에 항상 떠 있고, 버튼을 누르면 폴더·링크·프로그램을 열거나 지정한 문장·단축키를 입력함.
 
-- 실행 파일: `dist\WinDeck.exe` (설치 불필요, 파일 하나)
+![WinDeck 패널](docs/images/panel.png)
+
+## 다운로드
+
+**[최신 버전 받기 (Releases)](../../releases/latest)**
+
+| 파일 | 설명 |
+|---|---|
+| `WinDeck-Setup-x.y.z.exe` | 설치판 — 관리자 권한 없이 설치, 시작 메뉴 등록, Windows 설정 > 앱에서 제거 |
+| `WinDeck-Portable-x.y.z.zip` | 포터블판 — 압축 풀고 `WinDeck.exe` 실행, 설정은 같은 폴더에 저장 |
+
 - 요구 사항: Windows 10/11 (기본 내장 .NET Framework 4.8 사용, 추가 설치 없음)
+- 처음 실행 시 "Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행] (코드 서명 인증서 없음)
 
-## 1. 실행
+> Elgato Stream Deck과 관련 없는 개인 프로젝트이며, 실물 기기 없이 화면에서 쓰는 프로그램.
 
-`dist\WinDeck.exe` 더블클릭 → 화면 오른쪽 아래에 패널 표시.
+## 1. 사용법
+
+설치판은 시작 메뉴에서, 포터블판은 `WinDeck.exe` 더블클릭으로 실행 → 화면 오른쪽 아래에 패널 표시.
 
 | 조작 | 동작 |
 |---|---|
@@ -37,6 +50,8 @@
 
 버튼마다 이름, 설명(툴팁), 아이콘 이미지(PNG·JPG·ICO·exe 아이콘), 배경색, 글자색 지정 가능.
 
+<img src="docs/images/edit.png" alt="버튼 편집 창" width="560">
+
 ## 3. 설정 (패널의 ⚙ 또는 트레이 메뉴)
 
 - 보이기/숨기기 단축키
@@ -48,6 +63,8 @@
 
 설정 파일 위치: `%APPDATA%\WinDeck\config.json` (포터블판은 exe 옆 `WinDeckData\config.json`)
 불러오기 직전 설정은 `%APPDATA%\WinDeck\backups\` 에 자동 보관.
+
+<img src="docs/images/settings.png" alt="설정 창" width="400">
 
 ## 4. 알려진 제한
 
