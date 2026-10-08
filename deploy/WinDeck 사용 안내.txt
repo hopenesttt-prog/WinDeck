@@ -4,6 +4,9 @@
 화면에 떠 있는 8칸 버튼 패널입니다.
 버튼을 누르면 폴더·웹사이트·프로그램이 열리거나, 지정한 문장·단축키가 입력됩니다.
 
+최신 버전 받기: https://github.com/hopenesttt-prog/WinDeck/releases/latest
+(새 버전은 설치판을 덮어 설치하면 버튼 설정이 그대로 유지됩니다)
+
 
 ■ 처음 실행할 때 "Windows의 PC 보호" 창이 뜨면
 

@@ -113,7 +113,16 @@ release.bat
 
 경로는 `%USERPROFILE%\Documents`, `\\서버\공유폴더` 처럼 누구 PC에서나 통하는 형태로 입력. `C:\Users\내이름\...` 경로는 동료 PC에 없음.
 
-**업데이트 배포**: `src\AssemblyInfo.cs` 의 버전 숫자 변경 → `release.bat` → 새 설치 파일을 덮어 설치하면 버튼 설정 유지. 설치 중 실행 중인 WinDeck은 자동 종료.
+**업데이트 배포** (설치판을 덮어 설치하면 버튼 설정 유지, 실행 중인 WinDeck은 설치 중 자동 종료)
+1. `src\AssemblyInfo.cs` 의 버전 숫자 변경, `CHANGELOG.md` 에 변경 내용 추가
+2. `release.bat` 실행 → 변경 사항 커밋 후 `git push`
+3. `release` 폴더에서 GitHub 릴리스 생성 (파일 이름만 쓸 것 — 전체 경로에 `#` 이 있으면 gh 가 표시 이름 구분자로 해석함)
+
+```bash
+gh release create v1.0.1 WinDeck-Setup-1.0.1.exe WinDeck-Portable-1.0.1.zip --title "WinDeck 1.0.1" --notes "변경 내용"
+```
+
+팀원 다운로드 주소는 항상 같음: <https://github.com/hopenesttt-prog/WinDeck/releases/latest>
 
 **보안 경고**: 코드 서명 인증서가 없어 처음 실행 시 "Windows의 PC 보호" 창 표시 → [추가 정보] → [실행]. 일부 백신이 키 입력 기능 때문에 의심할 수 있음 — 사내 배포 시 IT 담당자에게 예외 등록 요청.
 
