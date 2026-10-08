@@ -41,6 +41,7 @@ Name: "autostart"; Description: "Windows 시작 시 자동 실행"; GroupDescrip
 [Files]
 Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\deploy\*.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 ; 팀 기본 버튼 세트 (deploy 폴더에 있을 때만 포함, 첫 실행 때 한 번 사용)
 Source: "..\deploy\WinDeck.defaults.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 

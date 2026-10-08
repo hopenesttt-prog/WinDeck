@@ -6,6 +6,10 @@
 
 ## 다운로드
 
+> [!WARNING]
+> **Microsoft Edge로는 설치되지 않습니다 (1.0.0 기준).**
+> Chrome, 네이버 웨일, Firefox 등 다른 브라우저로 내려받으세요.
+
 **[최신 버전 받기 (Releases)](../../releases/latest)**
 
 | 파일 | 설명 |
@@ -16,7 +20,7 @@
 - 요구 사항: Windows 10/11 (기본 내장 .NET Framework 4.8 사용, 추가 설치 없음)
 - 처음 실행 시 "Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행] (코드 서명 인증서 없음)
 
-> Elgato Stream Deck과 관련 없는 개인 프로젝트이며, 실물 기기 없이 화면에서 쓰는 프로그램.
+> Elgato Stream Deck과 관련 없는 개인 프로젝트이며, 실물 기기 없이 화면에서 쓰는 프로그램. [MIT 라이선스](LICENSE)로 자유롭게 사용·수정·배포 가능.
 
 ## 1. 사용법
 
@@ -146,3 +150,7 @@ gh release create v1.0.1 WinDeck-Setup-1.0.1.exe WinDeck-Portable-1.0.1.zip --ti
 | `deploy\` | 팀원용 사용 안내문, (선택) 팀 기본 버튼 세트 |
 | `release.ps1`, `release.bat` | 설치판·포터블판 생성 |
 | `tests\` | 자동 점검 프로그램 |
+
+## 라이선스
+
+[MIT](LICENSE) © 2026 hopenesttt-prog — 사용·복사·수정·배포 자유, 단 저작권 표시와 라이선스 문구 유지. 프로그램은 "있는 그대로" 제공되며 어떤 보증도 하지 않음.

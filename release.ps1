@@ -28,6 +28,7 @@ $portable = Join-Path $stage 'WinDeck'
 New-Item -ItemType Directory -Force $portable, (Join-Path $portable 'WinDeckData') | Out-Null
 Copy-Item $exe $portable
 $guides | ForEach-Object { Copy-Item $_.FullName $portable }
+Copy-Item (Join-Path $root 'LICENSE') (Join-Path $portable 'LICENSE.txt')
 if (Test-Path $defaults) { Copy-Item $defaults $portable }
 $zip = Join-Path $release "WinDeck-Portable-$version.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }

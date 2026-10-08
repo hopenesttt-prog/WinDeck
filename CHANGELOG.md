@@ -4,6 +4,9 @@
 
 첫 배포 버전.
 
+> [!WARNING]
+> **Microsoft Edge로는 설치되지 않습니다.** Chrome, 네이버 웨일, Firefox 등 다른 브라우저로 내려받으세요.
+
 ### 받을 파일
 - **WinDeck-Setup-1.0.0.exe** — 설치판 (권장). 관리자 권한 없이 설치, 시작 메뉴 등록, Windows 설정 > 앱에서 제거
 - **WinDeck-Portable-1.0.0.zip** — 포터블판. 압축을 풀고 `WinDeck.exe` 실행, 설정은 같은 폴더의 `WinDeckData`에 저장
@@ -20,3 +23,4 @@
 - ``Ctrl+` `` 로 패널 숨기기/보이기, 트레이 아이콘 메뉴
 - Windows 시작 시 자동 실행, 설정 내보내기(백업)·불러오기
 - 팀 기본 버튼 세트 (`WinDeck.defaults.json`) 첫 실행 적용
+- MIT 라이선스
